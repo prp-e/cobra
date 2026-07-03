@@ -22,7 +22,7 @@ import numpy as np
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--dataset_name", type=str, default="HuggingFaceFW/fineweb-edu")
-    p.add_argument("--dataset_config", type=str, default="sample-100BT")
+    p.add_argument("--dataset_config", type=str, default="sample-10BT")
     p.add_argument("--out_dir", type=str, default="data/shards")
     p.add_argument("--meta_path", type=str, default="data/cache/meta.json")
     p.add_argument("--shard_tokens", type=int, default=100_000_000, help="tokens per shard file")
