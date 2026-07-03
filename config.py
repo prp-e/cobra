@@ -34,13 +34,27 @@ class ModelConfig:
 
 
 def get_model_config(size: str = "1.4B") -> ModelConfig:
-    """Config switch. size in {"1.4B", "2.8B"}."""
-    if size == "1.4B":
+    """Config switch. size in {"150M", "1.4B", "2.8B"}.
+
+    "150M"  : d_model=768,  n_layer=30 -> ~152M params. Small/fast tier for
+              pipeline smoke tests, training-loop debugging, or running on
+              modest single-GPU hardware (e.g. a 4090 or smaller) without
+              waiting on a multi-day run to validate correctness.
+    "1.4B"  : d_model=2048, n_layer=48 -> ~1.37B params. Default production size.
+    "2.8B"  : d_model=2560, n_layer=64 -> ~2.8B params. Larger production size.
+
+    All three share the same architecture hyperparameters (E=2, N=16,
+    d_conv=4, dt_rank=ceil(d_model/16), padded vocab, seq_len=2048) --
+    only d_model/n_layer scale, per spec (never resize via other knobs).
+    """
+    if size == "150M":
+        return ModelConfig(d_model=768, n_layer=30)
+    elif size == "1.4B":
         return ModelConfig(d_model=2048, n_layer=48)
     elif size == "2.8B":
         return ModelConfig(d_model=2560, n_layer=64)
     else:
-        raise ValueError(f"unknown size {size!r}, expected '1.4B' or '2.8B'")
+        raise ValueError(f"unknown size {size!r}, expected '150M', '1.4B', or '2.8B'")
 
 
 @dataclass
@@ -48,7 +62,7 @@ class TrainConfig:
     model_size: str = "1.4B"
 
     # optimizer
-    peak_lr: float = 3e-4               # 3e-4 for 1.4B, use 2.5e-4 for 2.8B (set in get_train_config)
+    peak_lr: float = 3e-4               # 3e-4 (1.4B) / 2.5e-4 (2.8B) / 6e-4 (150M) -- set in get_train_config
     min_lr_ratio: float = 0.10          # cosine decays down to 10% of peak
     warmup_ratio: float = 0.015         # 1.5% of total steps, within the 1-2% spec range
     weight_decay: float = 0.1
@@ -82,16 +96,21 @@ class TrainConfig:
     #        4090 24GB     : micro_batch_size=2  -> 2*2048=4096 tok/microbatch
     #                        grad_accum_steps = 524288 / 4096 = 128
     #   Same *architecture* and same *effective* global batch everywhere;
-    #   only micro_batch_size + grad_accum_steps change per GPU.
+    #   only micro_batch_size + grad_accum_steps change per GPU. The 150M
+    #   tier is small enough that even a laptop/4090-class GPU can usually
+    #   afford a much larger micro_batch_size (fewer/no grad-accum steps
+    #   needed), which is exactly why it's useful for fast iteration.
 
 
 def get_train_config(model_size: str = "1.4B", **overrides) -> TrainConfig:
-    if model_size == "1.4B":
+    if model_size == "150M":
+        cfg = TrainConfig(model_size="150M", peak_lr=6e-4)  # smaller model -> can tolerate a higher peak LR
+    elif model_size == "1.4B":
         cfg = TrainConfig(model_size="1.4B", peak_lr=3e-4)
     elif model_size == "2.8B":
         cfg = TrainConfig(model_size="2.8B", peak_lr=2.5e-4)
     else:
-        raise ValueError(f"unknown size {model_size!r}")
+        raise ValueError(f"unknown size {model_size!r}, expected '150M', '1.4B', or '2.8B'")
     for k, v in overrides.items():
         setattr(cfg, k, v)
     return cfg
