@@ -44,6 +44,8 @@ from model.model import MambaLM  # noqa: E402
 from evaluate import evaluate_perplexity  # noqa: E402
 from sample import generate, FIXED_PROMPTS  # noqa: E402
 
+MODEL_SIZES = ["150M", "1.4B", "2.8B"]  # keep in sync with config.py's get_model_config/get_train_config
+
 
 def log(msg):
     print(msg, flush=True)
@@ -173,7 +175,7 @@ def preflight_timing_check(model, device, micro_batch_size, seq_len, vocab_size)
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model_size", type=str, default="1.4B", choices=["1.4B", "2.8B"])
+    ap.add_argument("--model_size", type=str, default="1.4B", choices=MODEL_SIZES)
     ap.add_argument("--micro_batch_size", type=int, default=8, help="sequences per microbatch; tune per GPU")
     ap.add_argument("--global_batch_tokens", type=int, default=524288)
     ap.add_argument("--max_tokens", type=int, default=None, help="override TrainConfig.max_tokens (e.g. for smoke tests)")
@@ -222,7 +224,7 @@ def main():
     tokens_per_step = tcfg.global_batch_tokens
     total_steps = tcfg.max_tokens // tokens_per_step
     warmup_steps = max(1, int(total_steps * tcfg.warmup_ratio))
-    log(f"[train] accum_steps={accum_steps} tokens_per_step={tokens_per_step} "
+    log(f"[train] model_size={args.model_size} accum_steps={accum_steps} tokens_per_step={tokens_per_step} "
         f"total_steps={total_steps} warmup_steps={warmup_steps} "
         f"grad_checkpointing={args.grad_checkpointing} scan_chunk_size={mcfg.scan_chunk_size} "
         f"num_workers={args.num_workers}")
