@@ -1,8 +1,13 @@
 # train.py
-"""Single-GPU training loop (B200/A100/4090 via micro-batch + grad accum,
-never via architecture changes). bf16 autocast forward/backward, fp32
-master weights + optimizer state (no GradScaler needed since we never cast
-params themselves to fp16/bf16). Fully resumable after preemption."""
+"""Single-GPU training loop (B200/H200/A100/4090 via micro-batch + grad
+accum, never via architecture changes). bf16 autocast forward/backward,
+fp32 master weights + optimizer state (no GradScaler needed since we never
+cast params themselves to fp16/bf16). Per-layer activation checkpointing
+is ON by default -- without it, the pure-PyTorch chunked scan's
+intermediates (O(Bsz*L*d_inner*N) per layer) all stay resident
+simultaneously across every layer until backward starts, which OOMs even
+at batch size 1 on a single GPU for a 48-layer model. Fully resumable
+after preemption."""
 import argparse
 import json
 import math
@@ -103,6 +108,11 @@ def main():
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--scan_mode", type=str, default="chunked", choices=["chunked", "naive"])
+    ap.add_argument("--grad_checkpointing", type=lambda s: s.lower() != "false", default=True,
+                     help="per-layer activation checkpointing (default True); disable only if you "
+                          "have verified you have enough memory without it -- required at typical "
+                          "batch sizes since the pure-PyTorch scan's intermediates are O(n_layer) "
+                          "resident simultaneously without it")
     args = ap.parse_args()
 
     mcfg = get_model_config(args.model_size)
@@ -127,9 +137,12 @@ def main():
     total_steps = tcfg.max_tokens // tokens_per_step
     warmup_steps = max(1, int(total_steps * tcfg.warmup_ratio))
     print(f"[train] accum_steps={accum_steps} tokens_per_step={tokens_per_step} "
-          f"total_steps={total_steps} warmup_steps={warmup_steps}")
+          f"total_steps={total_steps} warmup_steps={warmup_steps} "
+          f"grad_checkpointing={args.grad_checkpointing}")
 
-    model = MambaLM(mcfg, scan_mode=args.scan_mode).to(device)
+    model = MambaLM(
+        mcfg, scan_mode=args.scan_mode, use_grad_checkpointing=args.grad_checkpointing
+    ).to(device)
     print(f"[train] model params: {model.num_params()/1e9:.3f}B "
           f"(non-embedding: {model.num_params(non_embedding=True)/1e9:.3f}B)")
 
